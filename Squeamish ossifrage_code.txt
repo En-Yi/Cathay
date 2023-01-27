@@ -1,0 +1,1170 @@
+﻿
+###############################   """"資料觀察""""
+###############################   ##!!## 使用 R 語言，此檔案名為 code.ipynb
+#####                    ######
+#####    觀察資料過程    ######
+#####                    ######
+###############################
+###############################
+
+# 方法一的舉例
+table(train[which(train$CHARGE_CITY_CD == "A1"),]$AGE, train[which(train$CHARGE_CITY_CD == "A1"),]$Y1 )
+table(train[which(train$CHARGE_CITY_CD == "A2"),]$AGE, train[which(train$CHARGE_CITY_CD == "A2"),]$Y1 )
+table(train[which(train$CHARGE_CITY_CD == "B1"),]$AGE, train[which(train$CHARGE_CITY_CD == "B1"),]$Y1 )
+table(train[which(train$CHARGE_CITY_CD == "B2"),]$AGE, train[which(train$CHARGE_CITY_CD == "B2"),]$Y1 )
+table(train[which(train$CHARGE_CITY_CD == "C1"),]$AGE, train[which(train$CHARGE_CITY_CD == "C1"),]$Y1 )
+table(train[which(train$CHARGE_CITY_CD == "C2"),]$AGE, train[which(train$CHARGE_CITY_CD == "C2"),]$Y1 )
+table(train[which(train$CHARGE_CITY_CD == "D" ),]$AGE, train[which(train$CHARGE_CITY_CD == "D" ),]$Y1 )
+table(train[which(train$CHARGE_CITY_CD == "E" ),]$AGE, train[which(train$CHARGE_CITY_CD == "E" ),]$Y1 )
+
+# 方法二: similarity to Y1
+# import data: train1 為原始訓練資料
+train1 = read.csv("D:/train1.csv") 
+
+# library packages
+library(tidyverse)
+library(magrittr)
+library(doParallel)
+library(CluMix)     # package used to draw similarity plot
+
+# make cluster 
+cl = parallel::makeCluster(4) 
+registerDoParallel(cl)    
+stopCluster(cl) 
+
+train = train1
+
+# 轉因子有序或無序
+{
+  train.class = train %>% 
+    sapply(class) 
+  factor.var = names(train)[train.class == "factor"]
+  
+  train$Y1 = factor(train$Y1,ordered = FALSE)
+  contrasts(train$Y1)
+  
+  # transform some intrger variable to factor variable
+  train$EDUCATION_CD = as.factor(train$EDUCATION_CD)
+  train$MARRIAGE_CD = as.factor(train$MARRIAGE_CD)
+  train$LEVEL = as.factor(train$LEVEL)
+  train$RFM_M_LEVEL = as.factor(train$RFM_M_LEVEL)
+  order.factor = c('AGE','EDUCATION_CD','APC_1ST_AGE','INSD_1ST_AGE',
+                   'RFM_R','REBUY_TIMES_CNT','LEVEL','RFM_M_LEVEL',
+                   'LIFE_CNT')#,'MARRIAGE_CD'
+  sapply(order.factor, function(x){
+    train[,x] = factor(train[,x],ordered = T)
+  });
+  
+  # unordered factor
+  unorder.factor = factor.var[!(factor.var %in% order.factor)]
+  sapply(unorder.factor, function(x){
+    train[,x] = factor(train[,x],ordered = F)
+  });
+}
+
+train1 = train
+
+# 刪去缺失值太多的變數
+{
+apply(train1,2,function(x) sum(is.na(x)))
+
+# 先留下 ANNUAL_PREMIUM_AMT ，因為我們認為這是重要變數之一，但缺失值很多
+temp = select(train1, -ANNUAL_PREMIUM_AMT,-Y1)
+
+#評估後，刪除缺失值大於44000的欄位
+trash = names(temp)[colSums(is.na(temp))>44000]
+
+# View(trash)
+traini = train1[,!(names(train1) %in% trash)]
+traini = traini[,-1]
+
+train3 = traini[c(1:92,112:115)]
+train4 = train3[,!(1:length(train3) %in% c(18,21:25,50,54,69))]
+}
+
+
+# 用 CluMix 的 confounderPlot 函數繪製 similarity的圖
+# Y軸為跟Y1的相關程度，X軸為跟其中一個變數的相關程度
+
+confounderPlot(train4[,c(1:10,87) ], x="GENDER", y="Y1")
+confounderPlot(train4[,c(11:20,87)], x="LAST_B_ISSUE_DT", y="Y1")
+confounderPlot(train4[,c(21:30,87)], x="IF_ISSUE_B_IND", y="Y1")
+confounderPlot(train4[,c(31:40,87)], x="IF_ISSUE_L_IND", y="Y1")
+confounderPlot(train4[,c(41:50,87)], x="IF_ADD_R_IND", y="Y1")
+confounderPlot(train4[,c(51:60,87)], x="INSD_LAST_YEARDIF_CNT", y="Y1")
+confounderPlot(train4[,c(61:70,87)], x="X_B_IND", y="Y1")
+confounderPlot(train4[,c(71:80,87)], x="POLICY_VALUE_AMT", y="Y1")
+confounderPlot(train4[,c(81:86,87)], x="ILL_ADDITIONAL_AMT", y="Y1")
+
+# 如果直接用變數原名，圖呈現出來較不美觀，因此改用數字簡稱
+{
+newnames = as.character(c(1:87))
+oldnames = colnames(train4)
+for(i in 1:87) names(train4)[names(train4) == oldnames[i]] = newnames[i]
+}
+# 用前面的結果，選出前8個相關程度較高的變數
+confounderPlot(train4[,c(9, 8, 7, 28, 36, 66, 67, 61, 87)], x="66", y="87")
+
+# xgboost所選出的重要變數的similarity to Y1 較高的5個變數
+confounderPlot(train4[,c(2,85,68,12,86,87)], x="2", y="87")
+
+
+
+
+
+
+
+###############################   """"" 缺失值填補 """""
+###############################   ##!!## 使用 R 語言，此檔案名為 fill_full_na_5_batch_2.ipynb
+#####                    ######   
+#####    資料處理流程    ######
+#####                    ######
+###############################
+###############################
+
+# import data
+train = read.csv("D:/test.csv") # train.csv
+
+# Pretreatment
+{
+  # transform some intrger variable to factor variable
+  {
+    temp = c('EDUCATION_CD', 'MARRIAGE_CD', 'OCCUPATION_CLASS_CD',
+             'LEVEL', 'RFM_M_LEVEL')
+    train[temp] = lapply(train[temp], factor)  
+    rm(temp)
+  }
+  # factor variable have order or not
+  {
+    fact.var = names(train)[ sapply(train, class) == "factor"]
+    order.fact = c('AGE','EDUCATION_CD','MARRIAGE_CD','APC_1ST_AGE','INSD_1ST_AGE',
+                   'RFM_R','REBUY_TIMES_CNT','LEVEL','RFM_M_LEVEL', 'LIFE_CNT')
+    unorder.fact = fact.var[ !(fact.var %in% order.fact) ]
+    
+    sapply(  order.fact, function(x) train[,x] = factor(train[,x], ordered = T) )
+    sapply(unorder.fact, function(x) train[,x] = factor(train[,x], ordered = F) )
+    
+    rm(fact.var, order.fact, unorder.fact)
+  }
+  # through Y1 (response variable) and called train1
+  { 
+  # train1 = select(train, -Y1) # for train.csv
+    train1 = train              # for  test.csv 
+  }
+  # missmap
+  {
+    library(Amelia)
+    missmap(train1, main = "missmap for train1", margins = c(10,5) )
+  }
+  # missplot and identify groups
+  {
+    plot(colSums(is.na(train1)))
+    identify(colSums(is.na(train1)))
+  }
+  # splite train1 into 2^3 = 8 parts 
+  {
+    # first split
+    {
+      temp = is.na(train1[21])
+      train1.y = train1[ temp, ]
+      train1.n = train1[!temp, ]  
+    }
+    # second split
+    {
+      temp = is.na(train1.y[83])
+      train1.yy = train1.y[ temp, ]
+      train1.yn = train1.y[!temp, ]  
+      rm(train1.y)
+      
+      temp = is.na(train1.n[83])
+      train1.ny = train1.n[ temp, ]
+      train1.nn = train1.n[!temp, ]  
+      rm(train1.n)
+    }
+    # third split
+    {
+      temp = is.na(train1.yy[100])
+      train1.yyy = train1.yy[ temp, ]
+      train1.yyn = train1.yy[!temp, ]  
+      rm(train1.yy)
+      
+      temp = is.na(train1.yn[100])
+      train1.yny = train1.yn[ temp, ]
+      train1.ynn = train1.yn[!temp, ]  
+      rm(train1.yn)
+      
+      temp = is.na(train1.ny[100])
+      train1.nyy = train1.ny[ temp, ]
+      train1.nyn = train1.ny[!temp, ]  
+      rm(train1.ny)
+      
+      temp = is.na(train1.nn[100])
+      train1.nny = train1.nn[ temp, ]
+      train1.nnn = train1.nn[!temp, ]  
+      rm(train1.nn)
+    }
+  }
+  # calculate splite data length
+  {
+    split_data_length = vector()
+    split_data_list = list(train1.nnn, train1.nny, train1.nyn, train1.nyy,
+                           train1.ynn, train1.yny, train1.yyn, train1.yyy)
+    for (i in 1:8) {
+      split_data_length[i] = dim(split_data_list[[i]])[1]
+    }
+    print(split_data_length/10) # /5 for train, /10 for test
+    
+    # for train:        
+    # nnn: 8016.4   #1
+    # nny: 130.6    #1  
+    # nyn: 850.8    #3
+    # nyy: 2345.8   #3
+    #----------------#
+    # ynn: 6249.4   #2
+    # yny: 95.6     #2
+    # yyn: 866.8    #3
+    # yyy: 1444.6   #3
+    #================#
+    # for test:
+    # nnn: 6060.2   #1
+    # nny:  132.2   #2
+    # nyn:  700.2   #2
+    # nyy: 1686.0   
+    #----------------#
+    # ynn: 4565.5   #1   
+    # yny:   95.6   #2
+    # yyn:  683.0   
+    # yyy: 1077.3   #1
+
+  }
+  # batch length
+  { # for train
+    # L = matrix(
+    #   c(8017, 8016, 8016, 8016, 8017,
+    #      130,  131,  131,  131,  130,
+    #      850,  851,  851,  851,  851,
+    #     2346, 2346, 2345, 2346, 2346,
+    #     6249, 6250, 6249, 6250, 6249,
+    #       96,   95,   96,   95,   96,
+    #      867,  867,  867,  867,  866,
+    #     1445, 1444, 1445, 1444, 1445),
+    #   ncol = 10, byrow = TRUE)
+    
+    # for test
+    L = matrix(
+      c(6060, 6060,   6061, 6060,   6060, 6060,   6061, 6060,   6060, 6060, 
+        133,  132,    132,  132,    132,  132,    132,  132,    132,  133,
+        700,  700,    700,  700,    701,  701,    700,  700,    700,  700,   
+        1686, 1686,   1686, 1686,   1686, 1686,   1686, 1686,   1686, 1686,   
+        4565, 4566,   4565, 4566,   4565, 4566,   4565, 4566,   4565, 4566,   
+        95,   96,     96,   96,     95,   95,     96,   96,     96,   95,   
+        683,  683,    683,  683,    683,  683,    683,  683,    683,  683,   
+        1078, 1077,   1077, 1077,   1078, 1077,   1077, 1077,   1078, 1077),
+      ncol = 10, byrow = TRUE)
+  }
+  # permutation
+  {
+    train1.nnn = train1.nnn[sample(dim(train1.nnn)[1]),]
+    train1.nny = train1.nny[sample(dim(train1.nny)[1]),]
+    train1.nyn = train1.nyn[sample(dim(train1.nyn)[1]),]
+    train1.nyy = train1.nyy[sample(dim(train1.nyy)[1]),]
+    
+    train1.ynn = train1.ynn[sample(dim(train1.ynn)[1]),]
+    train1.yny = train1.yny[sample(dim(train1.yny)[1]),]
+    train1.yyn = train1.yyn[sample(dim(train1.yyn)[1]),]
+    train1.yyy = train1.yyy[sample(dim(train1.yyy)[1]),]
+  }
+  # change row.names
+  {
+    row.names(train1.nnn) = c(1:dim(train1.nnn)[1])
+    row.names(train1.nny) = c(1:dim(train1.nny)[1])
+    row.names(train1.nyn) = c(1:dim(train1.nyn)[1])
+    row.names(train1.nyy) = c(1:dim(train1.nyy)[1])
+    
+    row.names(train1.ynn) = c(1:dim(train1.ynn)[1])
+    row.names(train1.yny) = c(1:dim(train1.yny)[1])
+    row.names(train1.yyn) = c(1:dim(train1.yyn)[1])
+    row.names(train1.yyy) = c(1:dim(train1.yyy)[1])
+  }
+}
+
+# missforest 5 batch paralle run
+{
+  # library package
+  {
+    library(doParallel)
+    library(missForest)
+  }
+  # make cluster and initialize LNs and records
+  {
+    # make cluster
+    {
+      cl <- parallel::makeCluster(6)  
+      registerDoParallel(cl)    
+      on.exit(stopCluster(cl))    
+    }
+    # initial LN and record
+    {
+      LN = rep(1,8)
+      id.record = list()
+      imp.record = list()
+      err.record = list()
+      oob.record = list()
+      time.record = list()
+    }
+  }
+  # for train: 5 loop  ; for test: 10 loop
+  for ( i in 1:10) {
+    
+    a = Sys.time() # start time
+
+    {
+      # choose subset from each of the 8 parts
+      {
+        nnn = train1.nnn[( LN[1]:(LN[1]+L[1,i]-1) ),]
+        nny = train1.nny[( LN[2]:(LN[2]+L[2,i]-1) ),]
+        nyn = train1.nyn[( LN[3]:(LN[3]+L[3,i]-1) ),]
+        nyy = train1.nyy[( LN[4]:(LN[4]+L[4,i]-1) ),]
+        ynn = train1.ynn[( LN[5]:(LN[5]+L[5,i]-1) ),]
+        yny = train1.yny[( LN[6]:(LN[6]+L[6,i]-1) ),]
+        yyn = train1.yyn[( LN[7]:(LN[7]+L[7,i]-1) ),]
+        yyy = train1.yyy[( LN[8]:(LN[8]+L[8,i]-1) ),]
+      }
+      
+      # df_list, a list of the 8 dataframes
+      {
+      df_list = list(nnn, nny, nyn, nyy,  ynn, yny, yyn, yyy)
+      }
+      
+      # update LN
+      {
+        LN = LN + L[,i]
+      }
+      
+      # combine the 8 dataframes and remove them
+      {
+        x = Reduce(function(d1, d2) rbind(d1, d2), df_list)
+        rm(nnn, nny, nyn, nyy,  ynn, yny, yyn, yyy, df_list)  
+      }
+      
+      # leave ID
+      {
+        ID = x$CUS_ID
+        id.record[i] = as.data.frame(ID)
+      }
+      
+    }
+    
+    # run missForest and record ID, time, imp, error, oob
+    {
+      x.imp = missForest(x[,-1],
+                         maxiter = 7,
+                         ntree = 20,
+                         verbose = T,
+                         parallelize =  'forests')
+      
+      x.imp$ximp = mutate(x.imp$ximp, CUS_ID = ID)
+      
+      imp.record[i] = x.imp
+      err.record[i] = x.imp$error
+      oob.record[i] = x.imp$OOBerror
+      
+      rm(x, x.imp, ID)
+    }
+    
+    b = Sys.time() # end time
+    time.record[i] = b - a
+    rm(a, b)
+    
+  }
+  # stopcluster and remove LN, i, and cl
+  {
+    stopCluster(cl) 
+    rm(LN, i, cl)  
+  }
+  
+}
+rm(L, train1.nnn, train1.nny, train1.nyn, train1.nyy, 
+      train1.ynn, train1.yny, train1.yyn, train1.yyy)
+
+# combine dataframes in imp.recotd into train.X, then order by CUS_ID, finally write it out
+{
+  train.X = Reduce(function(d1, d2) rbind(d1, d2), imp.record)
+  train.imp = train.X[match(train$CUS_ID, train.X$CUS_ID), ]
+  write.table(train.imp, file = "D:/train_imp_complete.csv", sep=",", row.names = F, na = "NA")  
+}
+# read the dataframe, then mutate Y1, finally write it out(only for train)
+{
+  train.c = read.csv("D:/train_imp_complete.csv")
+  train.c = mutate(train.c, Y1 = train$Y1)
+  write.table(train.c, file="D:/train_imp_complete.csv", sep=",", row.names = F, na = "NA")  
+}
+
+
+
+
+
+
+###############################
+###############################   ##!!## 使用 Python 語言，此檔案名為 lgbm_cv.ipynb
+#####                    ######
+#####      建模流程      ######
+#####                    ######
+###############################
+###############################
+
+import os
+import winsound
+import numpy as np
+import pandas as pd
+import lightgbm as lgb
+from sklearn import metrics
+from sklearn.model_selection import GridSearchCV
+from sklearn.model_selection import train_test_split
+
+os.environ["PATH"] += os.pathsep + 'C:/Program Files (x86)/Graphviz2.38/bin/'
+
+# Read data
+data            = pd.read_csv('splited_data/org_train.csv',  dtype='unicode', encoding = 'BIG5')
+real_train_data = pd.read_csv('splited_data/real_train.csv', dtype='unicode', encoding = 'BIG5')
+real_test_data  = pd.read_csv('splited_data/real_test.csv',  dtype='unicode', encoding = 'BIG5')
+
+# split data via Stratified Sampling
+X_train, X_test, y_train, y_test = train_test_split(data, data.Y1, test_size=0.6)
+
+# Split out target Variable
+real_train_X = real_train_data[real_train_data.columns[~real_train_data.columns.isin(['Y1'])]]
+real_train_y = real_train_data['Y1']
+real_test_X  = real_test_data[real_test_data.columns[~real_test_data.columns.isin(['Y1'])]]
+real_test_y  = real_test_data['Y1']
+
+
+X_train, X_test = X_train.drop(['Y1'], axis=1), X_test.drop(['Y1'], axis=1)
+
+# Label encoding
+def replace_string_with_value(data):
+    data = data.replace(to_replace=['N', 'Y'], value=[0, 1])
+    data = data.replace(to_replace=['F', 'M'], \
+                             value=[100, 200])
+    
+    data['AGE'] = data['AGE'].replace(to_replace=['低', '中', '中高', '高'], \
+                             value=[24, 35, 45, 55])
+
+    data = data.replace(to_replace=['中', '中高', '低', '高'], \
+                             value=[0, 1 , -1, 2])
+    data = data.replace(to_replace=['A1', 'A2', 'B1', 'B2', 'C1', 'C2', 'D', 'E'], \
+                               value=[1, 1.5, 2, 2.5, 3, 3.5, 4, 5])
+    data = data.replace(to_replace=['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'], \
+                             value=[10, 11, 12, 13, 14, 15, 16, 17])
+
+    data = data.apply(pd.to_numeric, errors='coerce')
+    data = data.fillna(data.mean())
+
+    return data
+
+# Predicting test data
+X_train, X_test = replace_string_with_value(X_train), replace_string_with_value(X_test)
+y_train, y_test = y_train.replace(to_replace=['N', 'Y'], \
+                                  value=[0, 1]), y_test.replace(to_replace=['N', 'Y'], value=[0, 1])
+lgb_train = lgb.Dataset(X_train, y_train, free_raw_data=False)
+lgb_eval = lgb.Dataset(X_test, y_test, reference=lgb_train, free_raw_data=False)
+
+# Predicting REAL TEST data 
+real_X_train, real_X_test = replace_string_with_value(real_train_X), replace_string_with_value(real_test_X)
+
+real_y_train, real_y_test = real_train_y.replace(to_replace=['N', 'Y'], \
+                                  value=[0, 1]), real_test_y.replace(to_replace=['N', 'Y'], value=[0, 1])
+real_lgb_train = lgb.Dataset(real_X_train, real_y_train)
+
+# Set params
+# Scores ~0.784 (without tuning and early stopping)
+params = {'boosting_type': 'gbdt',
+          'max_depth' : -1,
+          'objective': 'binary',
+          'nthread': 3, # Updated from nthread
+          'num_leaves': 64,
+          'learning_rate': 0.05,
+          'max_bin': 512,
+          'subsample_for_bin': 200,
+          'subsample': 1,
+          'subsample_freq': 1,
+          'colsample_bytree': 0.8,
+          'reg_alpha': 5,
+          'reg_lambda': 10,
+          'min_split_gain': 0.5,
+          'min_child_weight': 1,
+          'min_child_samples': 5,
+          'scale_pos_weight': 1,
+          'num_class' : 1,
+          'metric' : 'binary_error'}
+
+# Create parameters to search
+gridParams = {
+    'learning_rate': [0.005],
+    'n_estimators': [40],
+    'num_leaves': [16],
+    'boosting_type' : ['gbdt'],
+    'objective' : ['binary'],
+    'random_state' : [501], # Updated from 'seed'
+    'colsample_bytree' : [0.6],
+    'subsample' : [0.6],
+    'reg_alpha' : [0],
+    'reg_lambda' : [0],
+    'min_child_samples': [18],
+    'min_child_weight':[0.001]
+    
+    }
+
+# Create classifier to use. Note that parameters have to be input manually
+# not as a dict
+mdl = lgb.LGBMClassifier(boosting_type= 'gbdt',
+          objective = 'binary',
+          n_jobs = 3, # Updated from 'nthread'
+          silent = True,
+          max_depth = params['max_depth'],
+          max_bin = params['max_bin'],
+          subsample_for_bin = params['subsample_for_bin'],
+          subsample = params['subsample'],
+          subsample_freq = params['subsample_freq'],
+          min_split_gain = params['min_split_gain'],
+          min_child_weight = params['min_child_weight'],
+          min_child_samples = params['min_child_samples'],
+          scale_pos_weight = params['scale_pos_weight'])
+
+# To view the default model params:
+mdl.get_params().keys()
+
+# Create the grid
+grid = GridSearchCV(mdl, gridParams,
+                    verbose=0,
+                    cv=4,
+                    n_jobs=2)
+# Run the grid
+grid.fit(X_train, y_train)
+
+# Print the best parameters found
+print(grid.best_params_)
+print(grid.best_score_)
+
+
+
+# Using parameters already set above, replace in the best from the grid search
+params['min_child_samples'] = grid.best_params_['min_child_samples']
+params['min_child_weight'] = grid.best_params_['min_child_weight']
+   
+params['colsample_bytree'] = grid.best_params_['colsample_bytree']
+params['learning_rate'] = grid.best_params_['learning_rate']
+# params['max_bin'] = grid.best_params_['max_bin']
+params['num_leaves'] = grid.best_params_['num_leaves']
+params['reg_alpha'] = grid.best_params_['reg_alpha']
+params['reg_lambda'] = grid.best_params_['reg_lambda']
+params['subsample'] = grid.best_params_['subsample']
+# params['subsample_for_bin'] = grid.best_params_['subsample_for_bin']
+params['metric'] = ['auc']
+
+print('Fitting with params: ')
+print(params)
+
+
+evals_result ={}
+bst = lgb.cv(params, lgb_train, num_boost_round=1000, nfold=6, early_stopping_rounds=100)
+lgb_model = lgb.train(params, lgb_train, valid_sets=[lgb_train,lgb_eval], \
+                       evals_result=evals_result, num_boost_round=len(bst['auc-mean']))
+y_pred = lgb_model.predict(X_test, num_iteration=lgb_model.best_iteration)
+ 
+print('The roc of prediction is:', metrics.roc_auc_score(y_test, y_pred) )
+
+# Play JoJo's Bizarre Adventure:Golden Wind OST
+winsound.PlaySound('resources/important2.wav', winsound.SND_FILENAME)
+
+
+
+import matplotlib.pyplot as plt
+print('Plotting metrics recorded during training...')
+ax = lgb.plot_metric(evals_result, metric='auc')
+plt.show()
+
+
+
+""" Predict REAL data """
+
+evals_result ={}
+bst = lgb.cv(params, real_lgb_train, num_boost_round=1000, nfold=6, early_stopping_rounds=100)
+lgb_model = lgb.train(params, real_lgb_train, num_boost_round=len(bst['auc-mean']))
+y_pred = lgb_model.predict(real_X_test, num_iteration=lgb_model.best_iteration)
+preds_out = pd.DataFrame({"Ypred": y_pred})
+
+preds_out.describe()
+
+
+""" Out put result data """
+
+submit_format = pd.read_csv('submit_format.csv', dtype='unicode', encoding = 'BIG5')
+official_submit = pd.concat([submit_format, preds_out], axis=1)
+official_submit.to_csv('official_submission_16.csv', index=False)
+
+
+
+
+###############################
+###############################   ##!!## 使用 Python 語言，此檔案名為 feature_selection_experiment.ipynb
+#####                    ######
+#####      建模流程      ######
+#####                    ######
+###############################
+###############################
+import pickle
+import winsound
+import numpy as np
+import pandas as pd
+import xgboost as xgb
+import seaborn as sns
+from sklearn import  metrics
+import matplotlib.pyplot as plt
+from scipy.optimize import fmin_powell
+from sklearn.metrics import mean_squared_error
+from ml_metrics import quadratic_weighted_kappa
+from sklearn.model_selection import train_test_split
+
+from matplotlib import pyplot
+%matplotlib inline
+
+# Read data
+org_data = pd.read_csv('splited_data/org_train.csv', dtype='unicode', encoding = 'BIG5')
+data = org_data.sample(n = 30000)
+valid_data = org_data.sample(n = 70000) 
+
+ans_data = valid_data[['Y1']]
+valid_data = valid_data.iloc[:, :131]
+valid_data.insert(131, "Y1", [0 for i in range(len(valid_data))], True) 
+
+
+# Label encoding test
+def replace_string_with_value(data):
+    data = data.replace(to_replace=['N', 'Y'], value=[0, 1])
+    data = data.replace(to_replace=['F', 'M'], \
+                             value=[100, 200])
+    
+    data['AGE'] = data['AGE'].replace(to_replace=['低', '中', '中高', '高'], \
+                             value=[24, 35, 45, 55])
+    
+    data['APC_1ST_AGE'] = data['APC_1ST_AGE'].replace(to_replace=['低', '中', '中高', '高'], \
+                             value=[24, 35, 45, 55])
+    
+    data['INSD_1ST_AGE'] = data['INSD_1ST_AGE'].replace(to_replace=['低', '中', '中高', '高'], \
+                             value=[24, 35, 45, 55])
+    
+    data = data.replace(to_replace=['中', '中高', '低', '高'], \
+                             value=[0, 1 , -1, 2])
+    data = data.replace(to_replace=['A1', 'A2', 'B1', 'B2', 'C1', 'C2', 'D', 'E'], \
+                               value=[1, 1.5, 2, 2.5, 3, 3.5, 4, 5])
+    data = data.replace(to_replace=['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'], \
+                             value=[10, 11, 12, 13, 14, 15, 16, 17])
+    
+    data['GENDER'] = data['GENDER'].fillna(150)
+    data['L1YR_C_CNT'] = data['L1YR_C_CNT'].fillna(0)
+    data['IF_ADD_INSD_R_IND'] =  data['IF_ADD_INSD_R_IND'].fillna(2)
+    data['IF_ISSUE_INSD_J_IND'] =  data['IF_ISSUE_INSD_J_IND'].fillna(2)
+    data['FINANCETOOLS_C'] = data['FINANCETOOLS_C'].fillna(0)
+    data['FINANCETOOLS_G'] = data['FINANCETOOLS_G'].fillna(1)
+    
+    # test
+    data = data.apply(pd.to_numeric, errors='coerce')
+
+    data = data.fillna(data.mean())
+    
+    return data
+
+def convert_dmatrix(data):
+
+    X, y = data.iloc[:,:-1],data.iloc[:,-1]
+    data_dmatrix = xgb.DMatrix(data=X,label=y)
+    return X, y, data_dmatrix
+
+data = replace_string_with_value(data)
+X, y, data_dmatrix = convert_dmatrix(data)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.6, random_state=123)
+
+
+# plot AUC score curve
+def plot_cv_results(cv_results):
+    eval_steps = range(len(cv_results['train-auc-mean']))
+
+    fig, ax = pyplot.subplots(1, 1, sharex=True, figsize=(8, 6))
+
+    ax.plot(eval_steps, [x for x in cv_results['train-auc-mean']], label='Train')
+    ax.plot(eval_steps, [x for x in cv_results['test-auc-mean']], label='Test')
+    ax.legend()
+    ax.set_title('Accuracy')
+    ax.set_xlabel('Number of iterations')
+
+# plot AUC score curve
+def plot_evals_result(xg_reg):
+    xgb_eval = xg_reg.evals_result()
+    eval_steps = range(len(xgb_eval['validation_0']['auc']))
+
+    fig, ax = pyplot.subplots(1, 1, sharex=True, figsize=(8, 6))
+
+    ax.plot(eval_steps, [x for x in xgb_eval['validation_0']['auc']], label='Train')
+    ax.plot(eval_steps, [x for x in xgb_eval['validation_1']['auc']], label='Test')
+    ax.legend()
+    ax.set_title('Accuracy')
+    ax.set_xlabel('Number of iterations')
+
+
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.6, random_state=123)
+xg_reg = xgb.XGBClassifier(objective ='binary:logistic', colsample_bytree = 0.6, learning_rate = 0.1, \
+                max_depth = 10, alpha = 10, n_estimators = 60)
+
+eval_s = [(X_train, y_train),(X_test, y_test)]
+xg_reg.fit(X_train,y_train, eval_set=eval_s, eval_metric='auc')
+
+preds = xg_reg.predict(X_test)
+plot_evals_result(xg_reg)
+
+
+
+params = {'objective': 'binary:logistic', 'colsample_bytree': 0.38, \
+          'eval_metric' : 'auc', 'gamma' : 0.0, 'subsample':0.6, 'reg_alpha':0.001,
+          'learning_rate': 0.01, 'max_depth': 4, 'alpha': 10, 'n_estimators': 1000, \
+          'min_child_weight': 6, 'tree_method': 'gpu_hist', 'scale_pos_weight':1}
+cv_results = xgb.cv(dtrain=data_dmatrix, params=params, nfold=3,
+            num_boost_round=1000, early_stopping_rounds=500, metrics="auc", as_pandas=True, seed=123)
+
+print((cv_results["test-auc-mean"]).tail(1))
+plot_cv_results(cv_results)
+
+
+
+""" 由上圖可知 當nround = 200，就stop了，
+   說明logloss最佳的狀態在nround = 32的時候。
+   經驗上，選擇early_stopping_rounds = 10%*(總迭代次數) """
+
+params = {'objective': 'binary:logistic', 'colsample_bytree': 0.38, \
+          'eval_metric' : 'auc', 'gamma' : 0.0, 'subsample':0.6, 'reg_alpha':0.001,
+          'learning_rate': 0.01, 'max_depth': 4, 'alpha': 10, 'n_estimators': 1000, \
+          'min_child_weight': 6, 'tree_method': 'gpu_hist', 'scale_pos_weight':1}
+cv_results = xgb.cv(dtrain=data_dmatrix, params=params, nfold=3,
+            num_boost_round=1000, early_stopping_rounds=100, metrics="auc", as_pandas=True, seed=123)
+
+print((cv_results["test-auc-mean"]).tail(1))
+plot_cv_results(cv_results)
+
+
+
+
+
+
+###############################
+###############################   ##!!## 使用 Python 語言，此檔案名為 xgboost_experiment_latest.ipynb
+#####                    ######
+#####      建模流程      ######
+#####                    ######
+###############################
+###############################
+# prevemnt kernal dead
+import os
+os.environ['KMP_DUPLICATE_LIB_OK']='True'
+
+import numpy as np
+import pandas as pd
+import xgboost as xgb
+
+from sklearn import  metrics
+from scipy.optimize import fmin_powell
+from imblearn.over_sampling import SMOTE
+
+from sklearn.metrics import mean_squared_error
+from ml_metrics import quadratic_weighted_kappa
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.decomposition import PCA
+from xgboost.sklearn import XGBClassifier
+from xgboost.sklearn import XGBRegressor
+from resources.speak_modual import say_accuracy
+
+data = pd.read_csv('splited_data/train_imp_complete.csv', dtype='unicode', encoding = 'BIG5')
+
+def one_hot_encoder(data):
+    low_cardinality_cols = [col_name for col_name in data.columns if 
+                                data[col_name].nunique() < 10 and
+                                data[col_name].dtype == "object"]
+    low_cardinality_cols.remove('Y1')
+    one_hot_encoded_X = pd.get_dummies(data[low_cardinality_cols])
+    
+    target = data['Y1']
+    data = data.drop(columns=low_cardinality_cols+['Y1'])
+    data = pd.concat([data, one_hot_encoded_X, target], axis=1, sort=False)
+    return data
+
+""" Resampling """
+""" 因為使用高度不平衡的數據時，分類器會預測出最常見的類，使其擁有異常高的準確率。"""
+""" 為了保持母體特性，因此先將train_data 做分層抽樣，再做Undersampling"""
+# 分層抽樣 stratify split
+def stratify_split(data):
+    train_set, valid_set = train_test_split(data, stratify=data['Y1'], \
+                                           test_size=0.6, random_state=42)
+    train_set = train_set.drop(columns=['CUS_ID'])
+    valid_set = valid_set.drop(columns=['CUS_ID'])
+
+    return train_set, valid_set
+
+data = one_hot_encoder(data)
+data, valid_data = stratify_split(data)
+
+
+
+ans_data = valid_data[['Y1']]
+valid_data = valid_data.iloc[:, :len(valid_data)-1]
+
+def replace_string_with_value(data):
+
+    data = data.replace(to_replace=['N', 'Y'], value=[0, 1])
+    data = data.replace(to_replace=['F', 'M'], \
+                             value=[100, 200])
+
+ data = data.replace(to_replace=['中', '中高', '低', '高'], \
+                             value=[0, 1 , -1, 2])
+    data = data.replace(to_replace=['A1', 'A2', 'B1', 'B2', 'C1', 'C2', 'D', 'E'], \
+                               value=[1, 1.5, 2, 2.5, 3, 3.5, 4, 5])
+    data = data.replace(to_replace=['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'], \
+                             value=[10, 11, 12, 13, 14, 15, 16, 17])
+
+data = data.fillna(data.mean())
+    
+    data = data.apply(pd.to_numeric, errors='coerce')
+    
+    return data
+
+def convert_dmatrix(data):
+    X, y = data.iloc[:,:-1],data.iloc[:,-1]
+    data_dmatrix = xgb.DMatrix(data=X,label=y)
+    return X, y, data_dmatrix
+
+""" 因為類別0與類別1的比例為98:1，若採用under sampling方法，valid set的數據量會太少。"""
+""" 所以採用SMOTE這over sampling的方法 """
+def over_sampling(data):
+    smote = SMOTE(ratio='minority')
+    X_sm, y_sm = smote.fit_sample(X, y)
+    
+    return X_sm, y_sm
+
+data = replace_string_with_value(data)
+X, y, data_dmatrix = convert_dmatrix(data)
+
+
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.6, random_state=123)
+xg_reg = xgb.XGBRegressor(objective ='binary:logistic', colsample_bytree = 0.6, learning_rate = 0.1, \
+                max_depth = 10, alpha = 10, n_estimators = 60)
+
+xg_reg.fit(X_train,y_train, eval_metric='auc')
+
+preds = xg_reg.predict(X_test)
+
+
+
+
+params = {'objective': 'binary:logistic', 'colsample_bytree': 0.38, \
+          'eval_metric' : 'auc', 'gamma' : 0.0, 'subsample':0.6, 'reg_alpha':0.001,
+          'learning_rate': 0.01, 'max_depth': 4, 'alpha': 10, 'n_estimators': 1000, \
+          'min_child_weight': 6, 'tree_method': 'gpu_hist', 'scale_pos_weight':1}
+
+cv_results = xgb.cv(dtrain=data_dmatrix, params=params, nfold=3,
+            num_boost_round=1000, early_stopping_rounds=500, metrics="auc", as_pandas=True, seed=123)
+
+print((cv_results["test-auc-mean"]).tail(1))
+
+
+
+
+xg_reg = xgb.train(params=params, dtrain=data_dmatrix, num_boost_round=1000)
+
+
+
+"""" Predict from valid """
+valid_data = replace_string_with_value(valid_data)
+X, y, data_dmatrix = convert_dmatrix(valid_data)
+
+final_test_preds = xg_reg.predict(data_dmatrix)
+ans_data = ans_data.replace(to_replace=['N', 'Y'], value=[0, 1])
+ans_data = ans_data.apply(pd.to_numeric, errors='coerce')
+
+
+
+preds_out = pd.DataFrame({"Ypred": final_test_preds})
+preds_out.describe()
+
+
+
+preds_out.to_csv('test_submission_2.csv', index=False)
+submission = pd.read_csv('test_submission_2.csv', \
+                       dtype='unicode', encoding = 'BIG5')
+
+
+
+submission['Ypred'] = submission['Ypred'].apply(pd.to_numeric, errors='coerce')
+
+new_accuracy = metrics.roc_auc_score(ans_data['Y1'], submission['Ypred'])*0.98645 
+print('accuracy', new_accuracy)
+
+say_accuracy(new_accuracy)
+
+
+
+for c in test_data.columns.tolist():
+    if c not in data.columns.tolist():
+        print(c)
+
+
+
+for c in data.columns.tolist():
+    if c not in test_data.columns.tolist():
+        print(c)
+
+
+
+test_data[list(set(test_data.columns.tolist()) & set(data.columns.tolist()))]
+data[list(set(test_data.columns.tolist()) & set(data.columns.tolist()))]
+
+
+
+""" Train Real data"""
+data = pd.read_csv('splited_data/train_imp_complete.csv', dtype='unicode', encoding = 'BIG5')
+test_data = pd.read_csv('splited_data/real_test.csv', dtype='unicode', encoding = 'BIG5')
+
+data = data.drop(columns=['CUS_ID'])
+data = one_hot_encoder(data)
+
+test_data = test_data.drop(columns=['CUS_ID'])
+test_data = one_hot_encoder(test_data)
+
+data_target, test_data_target = data['Y1'], test_data['Y1']
+
+intersection_col = list(set(test_data.columns.tolist()) & set(data.columns.tolist()))
+data = data[intersection_col].drop(columns=['Y1'])
+test_data = test_data[intersection_col].drop(columns=['Y1'])
+
+data = pd.concat([data, data_target], axis=1, sort=False)
+test_data = pd.concat([test_data, test_data_target], axis=1, sort=False)
+
+data = replace_string_with_value(data)
+X, y, data_dmatrix = convert_dmatrix(data)
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.6, random_state=123)
+
+xg_reg = xgb.XGBRegressor(objective ='binary:logistic', colsample_bytree = 0.6, learning_rate = 0.1, \
+                max_depth = 10, alpha = 10, n_estimators = 60)
+
+xg_reg.fit(X_train,y_train)
+
+preds = xg_reg.predict(X_test)
+rmse = np.sqrt(mean_squared_error(y_test, preds))
+print("RMSE: %f" % (rmse))
+
+xg_reg = xgb.train(params=params, dtrain=data_dmatrix, num_boost_round=1000)
+
+
+
+""" Predict from REAL TEST """
+
+test_data = replace_string_with_value(test_data)
+X, y, data_dmatrix = convert_dmatrix(test_data)
+
+final_test_preds = xg_reg.predict(data_dmatrix)
+
+
+
+preds_out = pd.DataFrame({"Ypred": final_test_preds})
+print(preds_out.describe())
+
+
+
+preds_out.to_csv('xgb_official_submission_24.csv', index=False)
+preds_out.std()
+
+
+
+
+
+
+###################################
+###################################   ##!!## 使用 Python 語言，此檔案名為 data_cleaning.ipynb
+#####      特徵工程流程      ######
+#####                        ######
+###################################
+###################################
+
+
+
+
+import pandas as pd
+import matplotlib.pyplot as plt
+
+train_data = pd.read_csv('splited_data/train_imp_complete.csv', dtype='unicode', encoding = 'BIG5')
+test_data = pd.read_csv('splited_data/real_test.csv', dtype='unicode', encoding = 'BIG5')
+
+def get_target_proportion(data):
+    # plot unbalanced box plot     
+    target_count = data.Y1.value_counts()
+    print('train_data Class 0:', target_count[0])
+    print('train_data Class 1:', target_count[1])
+    print('Proportion:', round(target_count[0] / target_count[1], 2), ': 1')
+
+    target_count.plot(kind='bar', title='Count (target)')
+    plt.show()
+
+get_target_proportion(train_data)
+
+def replace_string_with_value(data):
+    data = data.replace(to_replace=['N', 'Y'], value=[0, 1])
+    data = data.replace(to_replace=['F', 'M'], \
+                             value=[100, 200])
+    
+#     data['AGE'] = data['AGE'].replace(to_replace=['低', '中', '中高', '高'], \
+#                              value=[24, 35, 45, 55])
+    
+#     data['APC_1ST_AGE'] = data['APC_1ST_AGE'].replace(to_replace=['低', '中', '中高', '高'], \
+#                              value=[24, 35, 45, 55])
+    
+#     data['INSD_1ST_AGE'] = data['INSD_1ST_AGE'].replace(to_replace=['低', '中', '中高', '高'], \
+#                              value=[24, 35, 45, 55])
+    
+    data = data.replace(to_replace=['中', '中高', '低', '高'], \
+                             value=[0, 1 , -1, 2])
+    data = data.replace(to_replace=['A1', 'A2', 'B1', 'B2', 'C1', 'C2', 'D', 'E'], \
+                               value=[1, 1.5, 2, 2.5, 3, 3.5, 4, 5])
+    data = data.replace(to_replace=['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'], \
+                             value=[10, 11, 12, 13, 14, 15, 16, 17])
+    
+#     data['GENDER'] = data['GENDER'].fillna(150)
+#     data['L1YR_C_CNT'] = data['L1YR_C_CNT'].fillna(0)
+#     data['IF_ADD_INSD_R_IND'] =  data['IF_ADD_INSD_R_IND'].fillna(2)
+#     data['IF_ISSUE_INSD_J_IND'] =  data['IF_ISSUE_INSD_J_IND'].fillna(2)
+#     data['FINANCETOOLS_C'] = data['FINANCETOOLS_C'].fillna(0)
+#     data['FINANCETOOLS_G'] = data['FINANCETOOLS_G'].fillna(1)
+
+    data = data.fillna(data.mean())
+    
+    data = data.apply(pd.to_numeric, errors='coerce')
+    
+    return data
+
+train_data = replace_string_with_value(train_data)
+
+
+""" 因為使用高度不平衡的數據時，分類器會預測出最常見的類，使其擁有異常高的準確率。"""
+""" 我們以下的交叉驗證做這個實驗。 """
+from xgboost import XGBClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+
+y = train_data['Y1']
+
+# Remove 'CUS_ID' and 'Y1' columns
+train_data_without_target = train_data.drop(columns=['CUS_ID', 'Y1'])
+labels = train_data_without_target.columns[2:]
+X = train_data_without_target[labels]
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=1)
+
+model = XGBClassifier()
+model.fit(X_train, y_train)
+y_pred = model.predict(X_test)
+
+accuracy = accuracy_score(y_test, y_pred)
+print("Accuracy: %.2f%%" % (accuracy * 100.0))
+
+
+""" Resampling """
+""" 因為類別0與類別1的比例為98:1，若採用under sampling方法，valid set的數據量會太少。"""
+""" 所以採用SMOTE這over sampling的方法 """
+""" 為了保持母體特性，因此先將train_data 做分層抽樣，再做Undersampling"""
+# 分層抽樣 stratify split
+train_set, test_set = train_test_split(train_data, 
+                     stratify=train_data['Y1'], random_state=42)
+train_set_income_count = train_set['Y1'].value_counts().sort_index()
+print(train_set_income_count/len(train_set)*100)
+
+# Class count
+# count_class_0, count_class_1 = train_data.Y1.value_counts()
+
+# # Divide by class
+# df_class_0 = train_data[train_data['Y1'] == 'N']
+# df_class_1 = train_data[train_data['Y1'] == 'Y']
+
+# f_class_0_under = df_class_0.sample(count_class_1)
+# df_test_under = pd.concat([df_class_0_under, df_class_1], axis=0)
+
+# df_test_under.Y1.value_counts().plot(kind='bar', title='Count (Y1)');
+
+def plot_2d_space(X, y, label='Classes'):   
+    colors = ['#1F77B4', '#FF7F0E']
+    markers = ['o', 's']
+    for l, c, m in zip(np.unique(y), colors, markers):
+        plt.scatter(
+            X[y==l, 0],
+            X[y==l, 1],
+            c=c, label=l, marker=m
+        )
+    plt.title(label)
+    plt.legend(loc='upper right')
+    plt.show()
+
+from imblearn.over_sampling import SMOTE
+import numpy as np
+smote = SMOTE(ratio='minority')
+X_sm, y_sm = smote.fit_sample(X, y)
+
+plot_2d_space(X_sm, y_sm, 'SMOTE over-sampling')
+
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import MinMaxScaler
+scaler = MinMaxScaler(feature_range=[0, 1])
+
+#Fitting the PCA algorithm with our Data
+X = np.matrix(train_data.drop(['Y1','CUS_ID'], axis=1))
+X = scaler.fit_transform(X[1:, 0:8])
+pca = PCA().fit(X)
+
+#Plotting the Cumulative Summation of the Explained Variance
+plt.figure()
+plt.plot(np.cumsum(pca.explained_variance_ratio_))
+plt.xlabel('Number of Components')
+plt.ylabel('Variance (%)') #for each component
+plt.title('Train Dataset Explained Variance')
+plt.savefig('asd.jpg')
+plt.show()
+
+
+from mpl_toolkits.mplot3d import Axes3D
+X = np.matrix(train_data.drop(['Y1','CUS_ID'], axis=1))
+Y = np.array(train_data['Y1'])
+
+# plot PCA 3D result
+fig = plt.figure(1, figsize=(8, 6))
+ax = Axes3D(fig, elev=-150, azim=110)
+
+labelTups = [('0', 0), ('1', 1)]
+X_reduced = PCA(n_components=5).fit_transform(X)
+sc = ax.scatter(X_reduced[:, 0], X_reduced[:, 1], X_reduced[:, 2], c=Y,
+           cmap=plt.cm.Set1, edgecolor='k', s=40)
+ax.set_title("PCA with non-log(Fare)")
+ax.set_xlabel("1st eigenvector")
+ax.w_xaxis.set_ticklabels([])
+ax.set_ylabel("2nd eigenvector")
+ax.w_yaxis.set_ticklabels([])
+ax.set_zlabel("3rd eigenvector")
+ax.w_zaxis.set_ticklabels([])
+
+colors = [sc.cmap(sc.norm(i)) for i in [1, 0]]
+custom_lines = [plt.Line2D([],[], ls="", marker='.', 
+                mec='k', mfc=c, mew=.1, ms=20) for c in colors]
+ax.legend(custom_lines, [lt[0] for lt in labelTups], 
+          loc='center left', bbox_to_anchor=(1.0, .5))
+
+plt.show()
+
+""" REF """
+# https://www.kaggle.com/rafjaa/resampling-strategies-for-imbalanced-datasets
